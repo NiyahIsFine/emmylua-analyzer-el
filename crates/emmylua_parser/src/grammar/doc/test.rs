@@ -3548,4 +3548,37 @@ Syntax(Chunk)@0..98
         "#;
         assert_ast_eq!(code, result);
     }
+
+    #[test]
+    fn test_multi_dash_annotation() {
+        // 4 dashes followed by @class should be recognized as a doc annotation
+        let code4 = "----@class XXX\n";
+        let result4 = r#"
+Syntax(Chunk)@0..15
+  Syntax(Block)@0..15
+    Syntax(Comment)@0..14
+      Token(TkDocStart)@0..5 "----@"
+      Syntax(DocTagClass)@5..14
+        Token(TkTagClass)@5..10 "class"
+        Token(TkWhitespace)@10..11 " "
+        Token(TkName)@11..14 "XXX"
+    Token(TkEndOfLine)@14..15 "\n"
+        "#;
+        assert_ast_eq!(code4, result4);
+
+        // 5 dashes followed by @class should also be recognized as a doc annotation
+        let code5 = "-----@class XXX\n";
+        let result5 = r#"
+Syntax(Chunk)@0..16
+  Syntax(Block)@0..16
+    Syntax(Comment)@0..15
+      Token(TkDocStart)@0..6 "-----@"
+      Syntax(DocTagClass)@6..15
+        Token(TkTagClass)@6..11 "class"
+        Token(TkWhitespace)@11..12 " "
+        Token(TkName)@12..15 "XXX"
+    Token(TkEndOfLine)@15..16 "\n"
+        "#;
+        assert_ast_eq!(code5, result5);
+    }
 }
