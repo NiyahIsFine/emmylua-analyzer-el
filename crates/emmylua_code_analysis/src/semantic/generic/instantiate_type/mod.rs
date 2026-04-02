@@ -18,7 +18,10 @@ use crate::{
 use super::type_substitutor::{SubstitutorValue, TypeSubstitutor};
 use crate::TypeVisitTrait;
 use crate::semantic::member::find_members_with_key;
-pub use instantiate_func_generic::{build_self_type, infer_self_type, instantiate_func_generic};
+pub use instantiate_func_generic::{
+    build_self_type, infer_self_type, instantiate_func_generic, resolve_arg_name_from_exprs,
+    resolve_arg_string_from_exprs,
+};
 pub use instantiate_special_generic::get_keyof_members;
 pub use instantiate_special_generic::instantiate_alias_call;
 

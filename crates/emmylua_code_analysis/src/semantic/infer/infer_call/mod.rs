@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use emmylua_parser::{LuaAstNode, LuaCallExpr, LuaExpr, LuaLiteralToken, LuaSyntaxKind, PathTrait};
+use emmylua_parser::{LuaAstNode, LuaCallExpr, LuaExpr, LuaSyntaxKind};
 use rowan::TextRange;
 
 use super::{
@@ -19,7 +19,10 @@ use crate::{
         infer::narrow::get_type_at_call_expr_inline_cast,
     },
 };
-use crate::{build_self_type, infer_self_type, instantiate_func_generic, semantic::infer_expr};
+use crate::{
+    build_self_type, infer_self_type, instantiate_func_generic, resolve_arg_name_from_exprs,
+    resolve_arg_string_from_exprs, semantic::infer_expr,
+};
 use infer_require::infer_require_call;
 use infer_setmetatable::infer_setmetatable_call;
 
@@ -685,45 +688,13 @@ fn is_need_wrap_instance(
 }
 
 fn resolve_arg_name_infer(info: &LuaArgInferType, call_expr: &LuaCallExpr) -> Option<LuaType> {
-    let args: Vec<LuaExpr> = call_expr
-        .get_args_list()?
-        .get_args()
-        .collect();
-    let idx = (info.get_idx() as usize).checked_sub(1)?;
-    let arg_expr = args.get(idx)?;
-
-    if matches!(arg_expr, LuaExpr::LiteralExpr(_)) {
-        return None;
-    }
-
-    let access_path = match arg_expr {
-        LuaExpr::NameExpr(e) => e.get_access_path()?,
-        LuaExpr::IndexExpr(e) => e.get_access_path()?,
-        _ => return None,
-    };
-
-    let last_segment = access_path.rsplit('.').next().unwrap_or(&access_path);
-    let result_name = format!("{}{}", info.get_prefix(), last_segment);
-    Some(LuaType::Ref(LuaTypeDeclId::global(&result_name)))
+    let args: Vec<LuaExpr> = call_expr.get_args_list()?.get_args().collect();
+    resolve_arg_name_from_exprs(info, &args)
 }
 
 fn resolve_arg_string_infer(info: &LuaArgInferType, call_expr: &LuaCallExpr) -> Option<LuaType> {
-    let args: Vec<LuaExpr> = call_expr
-        .get_args_list()?
-        .get_args()
-        .collect();
-    let idx = (info.get_idx() as usize).checked_sub(1)?;
-    let arg_expr = args.get(idx)?;
-
-    let LuaExpr::LiteralExpr(literal_expr) = arg_expr else {
-        return None;
-    };
-    let LuaLiteralToken::String(string_token) = literal_expr.get_literal()? else {
-        return None;
-    };
-    let string_value = string_token.get_value();
-    let result_name = format!("{}{}", info.get_prefix(), string_value);
-    Some(LuaType::Ref(LuaTypeDeclId::global(&result_name)))
+    let args: Vec<LuaExpr> = call_expr.get_args_list()?.get_args().collect();
+    resolve_arg_string_from_exprs(info, &args)
 }
 
 fn is_last_call_expr(call_expr: &LuaCallExpr) -> bool {

@@ -125,11 +125,12 @@ pub fn instantiate_func_generic(
 
 /// Resolve a `UseArgNameX` annotation: take the X-th call argument (1-indexed),
 /// extract the last `.`-separated segment of its access path, and prepend the prefix.
-fn resolve_arg_name_from_exprs(info: &LuaArgInferType, args: &[LuaExpr]) -> Option<LuaType> {
+/// Returns `None` if the argument is a literal expression (not a code name/index path).
+pub fn resolve_arg_name_from_exprs(info: &LuaArgInferType, args: &[LuaExpr]) -> Option<LuaType> {
     let idx = (info.get_idx() as usize).checked_sub(1)?;
     let arg_expr = args.get(idx)?;
 
-    // Must NOT be a string literal
+    // Must NOT be a literal expression (string, number, bool, etc.)
     if matches!(arg_expr, LuaExpr::LiteralExpr(_)) {
         return None;
     }
@@ -147,7 +148,10 @@ fn resolve_arg_name_from_exprs(info: &LuaArgInferType, args: &[LuaExpr]) -> Opti
 
 /// Resolve a `UseArgStringX` annotation: take the X-th call argument (1-indexed) as a string
 /// literal, and prepend the prefix.
-fn resolve_arg_string_from_exprs(info: &LuaArgInferType, args: &[LuaExpr]) -> Option<LuaType> {
+pub fn resolve_arg_string_from_exprs(
+    info: &LuaArgInferType,
+    args: &[LuaExpr],
+) -> Option<LuaType> {
     let idx = (info.get_idx() as usize).checked_sub(1)?;
     let arg_expr = args.get(idx)?;
 
