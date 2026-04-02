@@ -609,4 +609,28 @@ mod tests {
         ));
         Ok(())
     }
+
+    #[gtest]
+    fn test_cross_file_global_table_definition() -> Result<()> {
+        let mut ws = ProviderVirtualWorkspace::new();
+        ws.def_file(
+            "file_a.lua",
+            r#"
+            G1 = {}
+            G1.a = 1
+            "#,
+        );
+
+        // Navigation from G1.a in File B should navigate to G1.a in file_a.lua (line 3)
+        check!(ws.check_definition(
+            r#"
+            local x = G1.a<??>
+            "#,
+            vec![Expected {
+                file: "file_a.lua".to_string(),
+                line: 2,
+            }],
+        ));
+        Ok(())
+    }
 }

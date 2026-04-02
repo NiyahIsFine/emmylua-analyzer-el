@@ -489,4 +489,109 @@ mod test {
         assert_ne!(ws.expr_ty("R_x"), LuaType::Nil);
         assert_ne!(ws.expr_ty("R_x2"), LuaType::Nil);
     }
+
+    #[test]
+    fn test_cross_file_global_table_member() {
+        let mut ws = VirtualWorkspace::new();
+
+        ws.def(
+            r#"
+        G1 = {}
+        G1.a = 1
+        "#,
+        );
+
+        ws.def(
+            r#"
+        B = G1.a
+        "#,
+        );
+
+        let b_ty = ws.expr_ty("B");
+        assert_ne!(
+            b_ty,
+            LuaType::Unknown,
+            "Cross-file global table member should be inferred, got: {:?}",
+            b_ty
+        );
+        assert_ne!(
+            b_ty,
+            LuaType::Nil,
+            "Cross-file global table member should not be nil, got: {:?}",
+            b_ty
+        );
+    }
+
+    #[test]
+    fn test_cross_file_global_table_member_batch_load() {
+        let mut ws = VirtualWorkspace::new();
+
+        ws.def_files(vec![
+            (
+                "file_a.lua",
+                r#"
+        G2 = {}
+        G2.b = 2
+        "#,
+            ),
+            (
+                "file_b.lua",
+                r#"
+        C = G2.b
+        "#,
+            ),
+        ]);
+
+        let c_ty = ws.expr_ty("C");
+        assert_ne!(
+            c_ty,
+            LuaType::Unknown,
+            "Batch-loaded cross-file global table member should be inferred, got: {:?}",
+            c_ty
+        );
+        assert_ne!(
+            c_ty,
+            LuaType::Nil,
+            "Batch-loaded cross-file global table member should not be nil, got: {:?}",
+            c_ty
+        );
+    }
+
+    // Test with reversed file order (file_b defines the usage, file_a defines the global).
+    // In a sorted batch load, file_b (lower FileId) may be processed before file_a.
+    #[test]
+    fn test_cross_file_global_table_member_reverse_order() {
+        let mut ws = VirtualWorkspace::new();
+
+        // file_b.lua is given first, so it gets a lower FileId and is analyzed first
+        ws.def_files(vec![
+            (
+                "file_b.lua",
+                r#"
+        D = G3.c
+        "#,
+            ),
+            (
+                "file_a.lua",
+                r#"
+        G3 = {}
+        G3.c = 3
+        "#,
+            ),
+        ]);
+
+        let d_ty = ws.expr_ty("D");
+        assert_ne!(
+            d_ty,
+            LuaType::Unknown,
+            "Reverse-order cross-file global table member should be inferred, got: {:?}",
+            d_ty
+        );
+        assert_ne!(
+            d_ty,
+            LuaType::Nil,
+            "Reverse-order cross-file global table member should not be nil, got: {:?}",
+            d_ty
+        );
+    }
 }
