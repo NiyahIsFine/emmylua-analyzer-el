@@ -253,12 +253,23 @@ fn set_index_expr_owner(analyzer: &mut LuaAnalyzer, var_expr: LuaVarExpr) -> Opt
                     LuaMemberOwner::Element(instance.get_range().clone())
                 }
                 LuaType::Ref(ref_id) => {
-                    let member_owner = LuaMemberOwner::Type(ref_id);
-                    analyzer.db.get_member_index_mut().set_member_owner(
-                        member_owner,
-                        member_id.file_id,
-                        member_id,
+                    // When `self` is typed as a Ref (e.g. inside a method on a
+                    // `---@type ClassName` variable), field assignments to `self`
+                    // should extend the class so members like `self.x2 = 2` are visible.
+                    let is_self_prefix = matches!(
+                        &prefix_expr,
+                        LuaExpr::NameExpr(n) if n.get_name_text().as_deref() == Some("self")
                     );
+                    let member_owner = LuaMemberOwner::Type(ref_id);
+                    if is_self_prefix {
+                        add_member(analyzer.db, member_owner, member_id);
+                    } else {
+                        analyzer.db.get_member_index_mut().set_member_owner(
+                            member_owner,
+                            member_id.file_id,
+                            member_id,
+                        );
+                    }
                     return Some(());
                 }
                 // is ref need extend field?
@@ -455,10 +466,46 @@ pub fn analyze_func_stat(analyzer: &mut LuaAnalyzer, func_stat: LuaFuncStat) -> 
     let signature_type = analyzer.infer_expr(&closure.clone().into()).ok()?;
     let type_owner = get_var_owner(analyzer, func_name.clone());
     set_index_expr_owner(analyzer, func_name.clone());
+    // For method definitions on @type-annotated variables, also register the method
+    // as a member of the referenced class (partial class contribution via @type).
+    try_add_method_to_ref_type(analyzer, func_name.clone());
     analyzer
         .db
         .get_type_index_mut()
         .bind_type(type_owner, LuaTypeCache::InferType(signature_type.clone()));
+
+    Some(())
+}
+
+/// When a method is defined on a local variable annotated with `---@type ClassName`,
+/// add that method as a member of `ClassName`. This enables the partial class pattern
+/// where multiple files contribute methods to a class using `---@type` annotations.
+fn try_add_method_to_ref_type(analyzer: &mut LuaAnalyzer, var_expr: LuaVarExpr) -> Option<()> {
+    let file_id = analyzer.file_id;
+    let index_expr = LuaIndexExpr::cast(var_expr.syntax().clone())?;
+    let prefix_expr = index_expr.get_prefix_expr()?;
+
+    let ref_id = match analyzer.infer_expr(&prefix_expr).ok()? {
+        LuaType::Ref(ref_id) => ref_id,
+        _ => return None,
+    };
+
+    let is_exact = analyzer
+        .db
+        .get_type_index()
+        .get_type_decl(&ref_id)
+        .map_or(false, |d| d.is_exact());
+    if is_exact {
+        return None;
+    }
+
+    let member_id = LuaMemberId::new(index_expr.get_syntax_id(), file_id);
+    let member_owner = LuaMemberOwner::Type(ref_id);
+    // set_member_owner was already called by set_index_expr_owner; just add to the member map.
+    analyzer
+        .db
+        .get_member_index_mut()
+        .add_member_to_owner(member_owner, member_id);
 
     Some(())
 }
