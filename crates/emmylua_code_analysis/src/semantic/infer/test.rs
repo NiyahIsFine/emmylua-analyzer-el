@@ -112,4 +112,25 @@ mod test {
 
         assert_eq!(ws.expr_ty("R"), ws.ty("nil"));
     }
+
+    #[test]
+    fn test_type_tag_overrides_class_def_binding_in_same_comment_block() {
+        let mut ws = VirtualWorkspace::new();
+
+        ws.def(
+            r#"
+            ---@class TestData
+            ---@field f1 boolean
+            --
+            ---@class TestData2
+            ---@field f2 boolean
+            ---@type TestData2
+            data = {}
+            "#,
+        );
+
+        let ty = ws.expr_ty("data");
+        let expected = ws.ty("TestData2");
+        assert_eq!(ty, expected);
+    }
 }

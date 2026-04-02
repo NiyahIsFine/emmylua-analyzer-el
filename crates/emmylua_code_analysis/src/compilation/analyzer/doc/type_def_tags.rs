@@ -1,6 +1,6 @@
 use emmylua_parser::{
     LuaAssignStat, LuaAst, LuaAstNode, LuaAstToken, LuaCommentOwner, LuaDocDescription,
-    LuaDocDescriptionOwner, LuaDocGenericDeclList, LuaDocTagAlias, LuaDocTagAttribute,
+    LuaDocDescriptionOwner, LuaDocGenericDeclList, LuaDocTag, LuaDocTagAlias, LuaDocTagAttribute,
     LuaDocTagClass, LuaDocTagEnum, LuaDocTagGeneric, LuaFuncStat, LuaLocalName, LuaLocalStat,
     LuaNameExpr, LuaSyntaxId, LuaSyntaxKind, LuaTokenKind, LuaVarExpr,
 };
@@ -391,6 +391,13 @@ pub fn analyze_func_generic(analyzer: &mut DocAnalyzer, tag: LuaDocTagGeneric) -
 }
 
 fn bind_def_type(analyzer: &mut DocAnalyzer, type_def: LuaType) -> Option<()> {
+    if analyzer
+        .comment
+        .get_doc_tags()
+        .any(|tag| matches!(tag, LuaDocTag::Type(_)))
+    {
+        return Some(());
+    }
     let owner = analyzer.comment.get_owner()?;
     match owner {
         LuaAst::LuaLocalStat(local_stat) => {

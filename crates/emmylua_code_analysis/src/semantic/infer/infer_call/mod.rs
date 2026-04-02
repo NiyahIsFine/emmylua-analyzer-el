@@ -8,9 +8,9 @@ use super::{
     InferFailReason, InferResult,
 };
 use crate::{
-    CacheEntry, DbIndex, InFiled, LuaFunctionType, LuaGenericType, LuaInstanceType,
-    LuaIntersectionType, LuaOperatorMetaMethod, LuaOperatorOwner, LuaSignature, LuaSignatureId,
-    LuaType, LuaTypeDeclId, LuaUnionType, TypeVisitTrait,
+    CacheEntry, DbIndex, InFiled, LuaArgInferType, LuaFunctionType, LuaGenericType,
+    LuaInstanceType, LuaIntersectionType, LuaOperatorMetaMethod, LuaOperatorOwner, LuaSignature,
+    LuaSignatureId, LuaType, LuaTypeDeclId, LuaUnionType, TypeVisitTrait,
 };
 use crate::{
     InferGuardRef,
@@ -19,7 +19,10 @@ use crate::{
         infer::narrow::get_type_at_call_expr_inline_cast,
     },
 };
-use crate::{build_self_type, infer_self_type, instantiate_func_generic, semantic::infer_expr};
+use crate::{
+    build_self_type, infer_self_type, instantiate_func_generic, resolve_arg_name_from_exprs,
+    resolve_arg_string_from_exprs, semantic::infer_expr,
+};
 use infer_require::infer_require_call;
 use infer_setmetatable::infer_setmetatable_call;
 
@@ -234,7 +237,7 @@ fn infer_signature_doc_function(
             signature.get_type_params(),
             signature.get_return_type(),
         );
-        if is_generic {
+        if is_generic || fake_doc_function.contain_tpl() {
             fake_doc_function = instantiate_func_generic(db, cache, &fake_doc_function, call_expr)?;
         }
 
@@ -653,6 +656,18 @@ pub(crate) fn unwrapp_return_type(
                 return Ok(self_type);
             }
         }
+        LuaType::ArgNameInfer(info) => {
+            if let Some(resolved) = resolve_arg_name_infer(info, &call_expr) {
+                return Ok(resolved);
+            }
+            return Ok(LuaType::Unknown);
+        }
+        LuaType::ArgStringInfer(info) => {
+            if let Some(resolved) = resolve_arg_string_infer(info, &call_expr) {
+                return Ok(resolved);
+            }
+            return Ok(LuaType::Unknown);
+        }
         LuaType::TypeGuard(_) => return Ok(LuaType::Boolean),
         _ => {}
     }
@@ -670,6 +685,16 @@ fn is_need_wrap_instance(
     }
 
     !call_expr.get_range().contains(inst.value.start())
+}
+
+fn resolve_arg_name_infer(info: &LuaArgInferType, call_expr: &LuaCallExpr) -> Option<LuaType> {
+    let args: Vec<LuaExpr> = call_expr.get_args_list()?.get_args().collect();
+    resolve_arg_name_from_exprs(info, &args)
+}
+
+fn resolve_arg_string_infer(info: &LuaArgInferType, call_expr: &LuaCallExpr) -> Option<LuaType> {
+    let args: Vec<LuaExpr> = call_expr.get_args_list()?.get_args().collect();
+    resolve_arg_string_from_exprs(info, &args)
 }
 
 fn is_last_call_expr(call_expr: &LuaCallExpr) -> bool {

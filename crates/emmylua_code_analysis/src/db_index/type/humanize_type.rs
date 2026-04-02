@@ -221,6 +221,12 @@ impl<'a> TypeHumanizer<'a> {
             LuaType::ConditionalInfer(s) => w.write_str(s),
             LuaType::Never => w.write_str("never"),
             LuaType::ModuleRef(file_id) => self.write_module_ref(*file_id, w),
+            LuaType::ArgNameInfer(info) => {
+                write!(w, "{}UseArgName{}", info.get_prefix(), info.get_idx())
+            }
+            LuaType::ArgStringInfer(info) => {
+                write!(w, "{}UseArgString{}", info.get_prefix(), info.get_idx())
+            }
             _ => w.write_str("unknown"),
         }
     }
