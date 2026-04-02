@@ -62,8 +62,8 @@ pub fn try_resolve_member(
             LuaType::Instance(instance) => LuaMemberOwner::Element(instance.get_range().clone()),
             LuaType::Ref(ref_id) => {
                 let member_id = unresolve_member.member_id;
-                // Only extend the class for method declarations (not field assignments).
-                // Field assignments on @type-annotated variables should trigger InjectField.
+                // Extend the class for method declarations, or for field assignments
+                // where the prefix is `self` (method body on a @type-annotated variable).
                 let is_method_decl = db
                     .get_member_index()
                     .get_member(&member_id)
@@ -73,7 +73,12 @@ pub fn try_resolve_member(
                             LuaMemberFeature::FileMethodDecl | LuaMemberFeature::MetaMethodDecl
                         )
                     });
-                if !is_method_decl {
+                let is_self_field = !is_method_decl
+                    && matches!(
+                        &unresolve_member.prefix,
+                        Some(LuaExpr::NameExpr(n)) if n.get_name_text().as_deref() == Some("self")
+                    );
+                if !is_method_decl && !is_self_field {
                     return Ok(());
                 }
                 let type_decl = db

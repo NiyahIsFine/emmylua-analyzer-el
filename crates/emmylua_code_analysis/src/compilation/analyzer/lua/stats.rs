@@ -253,12 +253,23 @@ fn set_index_expr_owner(analyzer: &mut LuaAnalyzer, var_expr: LuaVarExpr) -> Opt
                     LuaMemberOwner::Element(instance.get_range().clone())
                 }
                 LuaType::Ref(ref_id) => {
-                    let member_owner = LuaMemberOwner::Type(ref_id);
-                    analyzer.db.get_member_index_mut().set_member_owner(
-                        member_owner,
-                        member_id.file_id,
-                        member_id,
+                    // When `self` is typed as a Ref (e.g. inside a method on a
+                    // `---@type ClassName` variable), field assignments to `self`
+                    // should extend the class so members like `self.x2 = 2` are visible.
+                    let is_self_prefix = matches!(
+                        &prefix_expr,
+                        LuaExpr::NameExpr(n) if n.get_name_text().as_deref() == Some("self")
                     );
+                    let member_owner = LuaMemberOwner::Type(ref_id);
+                    if is_self_prefix {
+                        add_member(analyzer.db, member_owner, member_id);
+                    } else {
+                        analyzer.db.get_member_index_mut().set_member_owner(
+                            member_owner,
+                            member_id.file_id,
+                            member_id,
+                        );
+                    }
                     return Some(());
                 }
                 // is ref need extend field?

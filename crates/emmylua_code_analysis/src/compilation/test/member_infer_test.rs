@@ -455,4 +455,38 @@ mod test {
 
         assert_ne!(ws.expr_ty("R3"), LuaType::Nil);
     }
+
+    /// Test that fields assigned via `self.field = value` inside a method on a
+    /// `---@type ClassName` variable are collected as members of `ClassName`.
+    #[test]
+    fn test_type_annotation_self_field_extends_class() {
+        let mut ws = VirtualWorkspace::new();
+        ws.def(
+            r#"
+        ---@class XXX
+        local XXX_1 = {}
+
+        function XXX_1:Fun1()
+            self.x = 2
+        end
+
+        ---@type XXX
+        local XXX_2 = {}
+
+        function XXX_2:Fun2()
+            self.x2 = 2
+        end
+
+        ---@type XXX
+        local inst = XXX_1
+
+        R_x = inst.x
+        R_x2 = inst.x2
+        "#,
+        );
+
+        // Both x (from @class method) and x2 (from @type method) should be visible
+        assert_ne!(ws.expr_ty("R_x"), LuaType::Nil);
+        assert_ne!(ws.expr_ty("R_x2"), LuaType::Nil);
+    }
 }
