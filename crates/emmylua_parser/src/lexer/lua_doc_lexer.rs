@@ -110,6 +110,7 @@ impl LuaDocLexer<'_> {
                         }
                     }
                     3 => {
+                        reader.eat_while(|c| c == '-');
                         reader.eat_while(is_doc_whitespace);
                         match reader.current_char() {
                             '@' => {
@@ -368,6 +369,7 @@ impl LuaDocLexer<'_> {
                         }
                     }
                     3 => {
+                        reader.eat_while(|c| c == '-');
                         reader.eat_while(is_doc_whitespace);
                         match reader.current_char() {
                             '@' => {
@@ -557,6 +559,7 @@ impl LuaDocLexer<'_> {
                         }
                     }
                     3 => {
+                        reader.eat_while(|c| c == '-');
                         reader.eat_while(is_doc_whitespace);
                         match reader.current_char() {
                             '@' => {
