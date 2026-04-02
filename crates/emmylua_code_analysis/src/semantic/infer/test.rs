@@ -112,4 +112,30 @@ mod test {
 
         assert_eq!(ws.expr_ty("R"), ws.ty("nil"));
     }
+
+    // Regression test: when multiple `---@class` definitions appear in the same comment block
+    // (separated only by a bare `--` comment, not a blank line), the `---@type` annotation that
+    // follows should still correctly type the next statement.  Previously the first `---@class`
+    // would silently claim the following statement as its owner, preventing `---@type` from
+    // overriding the binding.
+    #[test]
+    fn test_type_tag_overrides_class_def_binding_in_same_comment_block() {
+        let mut ws = VirtualWorkspace::new();
+
+        ws.def(
+            r#"
+            ---@class TestCultivateData
+            ---@field needCheckReachable boolean
+            --
+            ---@class TestCultivate
+            ---@field ignoreNotEnoughCost boolean
+            ---@type TestCultivate
+            cultivateInfo = {}
+            "#,
+        );
+
+        let ty = ws.expr_ty("cultivateInfo");
+        let expected = ws.ty("TestCultivate");
+        assert_eq!(ty, expected);
+    }
 }
