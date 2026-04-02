@@ -9,9 +9,9 @@ use rowan::NodeOrToken;
 use smol_str::SmolStr;
 
 use crate::{
-    InferFailReason, LuaFunctionType, LuaMemberInfo, LuaMemberKey, LuaMemberOwner, LuaObjectType,
-    LuaSemanticDeclId, LuaTupleType, LuaTypeDeclId, LuaUnionType, SemanticDeclLevel, VariadicType,
-    check_type_compact,
+    InferFailReason, LuaArgInferType, LuaFunctionType, LuaMemberInfo, LuaMemberKey, LuaMemberOwner,
+    LuaObjectType, LuaSemanticDeclId, LuaTupleType, LuaTypeDeclId, LuaUnionType,
+    SemanticDeclLevel, VariadicType, check_type_compact,
     db_index::{DbIndex, LuaGenericType, LuaType},
     infer_node_semantic_decl,
     semantic::{
@@ -122,7 +122,16 @@ fn get_str_tpl_infer_type(name: &str) -> LuaType {
         "self" => LuaType::SelfInfer,
         "global" => LuaType::Global,
         "function" => LuaType::Function,
-        _ => LuaType::Ref(LuaTypeDeclId::global(&name)),
+        _ => {
+            if let Some((is_arg_name, info)) = LuaArgInferType::try_from_doc_name(name) {
+                return if is_arg_name {
+                    LuaType::ArgNameInfer(std::sync::Arc::new(info))
+                } else {
+                    LuaType::ArgStringInfer(std::sync::Arc::new(info))
+                };
+            }
+            LuaType::Ref(LuaTypeDeclId::global(&name))
+        }
     }
 }
 

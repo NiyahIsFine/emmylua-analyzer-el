@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use emmylua_parser::{LuaAstNode, LuaCallExpr, LuaExpr, LuaSyntaxKind};
+use emmylua_parser::{LuaAstNode, LuaCallExpr, LuaExpr, LuaLiteralToken, LuaSyntaxKind, PathTrait};
 use rowan::TextRange;
 
 use super::{
@@ -8,9 +8,9 @@ use super::{
     InferFailReason, InferResult,
 };
 use crate::{
-    CacheEntry, DbIndex, InFiled, LuaFunctionType, LuaGenericType, LuaInstanceType,
-    LuaIntersectionType, LuaOperatorMetaMethod, LuaOperatorOwner, LuaSignature, LuaSignatureId,
-    LuaType, LuaTypeDeclId, LuaUnionType, TypeVisitTrait,
+    CacheEntry, DbIndex, InFiled, LuaArgInferType, LuaFunctionType, LuaGenericType,
+    LuaInstanceType, LuaIntersectionType, LuaOperatorMetaMethod, LuaOperatorOwner, LuaSignature,
+    LuaSignatureId, LuaType, LuaTypeDeclId, LuaUnionType, TypeVisitTrait,
 };
 use crate::{
     InferGuardRef,
@@ -234,7 +234,7 @@ fn infer_signature_doc_function(
             signature.get_type_params(),
             signature.get_return_type(),
         );
-        if is_generic {
+        if is_generic || fake_doc_function.contain_tpl() {
             fake_doc_function = instantiate_func_generic(db, cache, &fake_doc_function, call_expr)?;
         }
 
@@ -653,6 +653,18 @@ pub(crate) fn unwrapp_return_type(
                 return Ok(self_type);
             }
         }
+        LuaType::ArgNameInfer(info) => {
+            if let Some(resolved) = resolve_arg_name_infer(info, &call_expr) {
+                return Ok(resolved);
+            }
+            return Ok(LuaType::Unknown);
+        }
+        LuaType::ArgStringInfer(info) => {
+            if let Some(resolved) = resolve_arg_string_infer(info, &call_expr) {
+                return Ok(resolved);
+            }
+            return Ok(LuaType::Unknown);
+        }
         LuaType::TypeGuard(_) => return Ok(LuaType::Boolean),
         _ => {}
     }
@@ -670,6 +682,48 @@ fn is_need_wrap_instance(
     }
 
     !call_expr.get_range().contains(inst.value.start())
+}
+
+fn resolve_arg_name_infer(info: &LuaArgInferType, call_expr: &LuaCallExpr) -> Option<LuaType> {
+    let args: Vec<LuaExpr> = call_expr
+        .get_args_list()?
+        .get_args()
+        .collect();
+    let idx = (info.get_idx() as usize).checked_sub(1)?;
+    let arg_expr = args.get(idx)?;
+
+    if matches!(arg_expr, LuaExpr::LiteralExpr(_)) {
+        return None;
+    }
+
+    let access_path = match arg_expr {
+        LuaExpr::NameExpr(e) => e.get_access_path()?,
+        LuaExpr::IndexExpr(e) => e.get_access_path()?,
+        _ => return None,
+    };
+
+    let last_segment = access_path.rsplit('.').next().unwrap_or(&access_path);
+    let result_name = format!("{}{}", info.get_prefix(), last_segment);
+    Some(LuaType::Ref(LuaTypeDeclId::global(&result_name)))
+}
+
+fn resolve_arg_string_infer(info: &LuaArgInferType, call_expr: &LuaCallExpr) -> Option<LuaType> {
+    let args: Vec<LuaExpr> = call_expr
+        .get_args_list()?
+        .get_args()
+        .collect();
+    let idx = (info.get_idx() as usize).checked_sub(1)?;
+    let arg_expr = args.get(idx)?;
+
+    let LuaExpr::LiteralExpr(literal_expr) = arg_expr else {
+        return None;
+    };
+    let LuaLiteralToken::String(string_token) = literal_expr.get_literal()? else {
+        return None;
+    };
+    let string_value = string_token.get_value();
+    let result_name = format!("{}{}", info.get_prefix(), string_value);
+    Some(LuaType::Ref(LuaTypeDeclId::global(&result_name)))
 }
 
 fn is_last_call_expr(call_expr: &LuaCallExpr) -> bool {

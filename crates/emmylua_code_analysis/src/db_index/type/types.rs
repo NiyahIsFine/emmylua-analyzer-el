@@ -69,6 +69,8 @@ pub enum LuaType {
     Conditional(Arc<LuaConditionalType>),
     ConditionalInfer(ArcIntern<SmolStr>),
     Mapped(Arc<LuaMappedType>),
+    ArgNameInfer(Arc<LuaArgInferType>),
+    ArgStringInfer(Arc<LuaArgInferType>),
 }
 
 impl PartialEq for LuaType {
@@ -123,6 +125,8 @@ impl PartialEq for LuaType {
             (LuaType::Conditional(a), LuaType::Conditional(b)) => a == b,
             (LuaType::ConditionalInfer(a), LuaType::ConditionalInfer(b)) => a == b,
             (LuaType::Mapped(a), LuaType::Mapped(b)) => a == b,
+            (LuaType::ArgNameInfer(a), LuaType::ArgNameInfer(b)) => a == b,
+            (LuaType::ArgStringInfer(a), LuaType::ArgStringInfer(b)) => a == b,
             _ => false, // 不同变体之间不相等
         }
     }
@@ -221,6 +225,8 @@ impl Hash for LuaType {
                 (51, ptr).hash(state)
             }
             LuaType::DocAttribute(a) => (52, a).hash(state),
+            LuaType::ArgNameInfer(a) => (53, a).hash(state),
+            LuaType::ArgStringInfer(a) => (54, a).hash(state),
         }
     }
 }
@@ -492,6 +498,8 @@ impl LuaType {
             LuaType::TypeGuard(inner) => inner.contain_tpl(),
             LuaType::Conditional(inner) => inner.contain_tpl(),
             LuaType::Mapped(_) => true,
+            LuaType::ArgNameInfer(_) => true,
+            LuaType::ArgStringInfer(_) => true,
             _ => false,
         }
     }
@@ -1746,5 +1754,54 @@ impl LuaMappedType {
             is_readonly,
             is_optional,
         }
+    }
+}
+
+/// Represents a `UseArgNameX` or `UseArgStringX` type annotation.
+/// `idx` is 1-indexed (1..=4). `prefix` is the dot-terminated prefix, e.g. `"AA.BB."` or `""`.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct LuaArgInferType {
+    pub idx: u8,
+    pub prefix: ArcIntern<SmolStr>,
+}
+
+impl LuaArgInferType {
+    pub fn new(idx: u8, prefix: impl Into<SmolStr>) -> Self {
+        Self {
+            idx,
+            prefix: ArcIntern::from(prefix.into()),
+        }
+    }
+
+    pub fn get_idx(&self) -> u8 {
+        self.idx
+    }
+
+    pub fn get_prefix(&self) -> &str {
+        self.prefix.as_str()
+    }
+
+    /// Try to parse a doc type name as a `UseArgNameX`/`UseArgStringX` pattern.
+    /// Returns `(is_arg_name, LuaArgInferType)` on success.
+    pub fn try_from_doc_name(name: &str) -> Option<(bool, Self)> {
+        let (prefix, suffix) = if let Some(pos) = name.rfind('.') {
+            (&name[..pos + 1], &name[pos + 1..])
+        } else {
+            ("", name)
+        };
+
+        let (is_arg_name, idx) = match suffix {
+            "UseArgName1" => (true, 1u8),
+            "UseArgName2" => (true, 2),
+            "UseArgName3" => (true, 3),
+            "UseArgName4" => (true, 4),
+            "UseArgString1" => (false, 1),
+            "UseArgString2" => (false, 2),
+            "UseArgString3" => (false, 3),
+            "UseArgString4" => (false, 4),
+            _ => return None,
+        };
+
+        Some((is_arg_name, Self::new(idx, prefix)))
     }
 }

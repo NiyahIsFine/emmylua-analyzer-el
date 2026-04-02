@@ -14,8 +14,8 @@ use smol_str::SmolStr;
 
 use crate::{
     AsyncState, DiagnosticCode, GenericParam, GenericTpl, InFiled, LuaAliasCallKind, LuaArrayLen,
-    LuaArrayType, LuaAttributeType, LuaMultiLineUnion, LuaTupleStatus, LuaTypeDeclId, TypeOps,
-    VariadicType,
+    LuaArrayType, LuaArgInferType, LuaAttributeType, LuaMultiLineUnion, LuaTupleStatus,
+    LuaTypeDeclId, TypeOps, VariadicType,
     db_index::{
         AnalyzeError, LuaAliasCallType, LuaConditionalType, LuaFunctionType, LuaGenericType,
         LuaIndexAccessKey, LuaIntersectionType, LuaMappedType, LuaObjectType, LuaStringTplType,
@@ -164,6 +164,14 @@ fn infer_buildin_or_ref_type(
             LuaType::Table
         }
         _ => {
+            if let Some((is_arg_name, info)) = LuaArgInferType::try_from_doc_name(name) {
+                return if is_arg_name {
+                    LuaType::ArgNameInfer(Arc::new(info))
+                } else {
+                    LuaType::ArgStringInfer(Arc::new(info))
+                };
+            }
+
             if let Some((tpl_id, constraint)) = analyzer.generic_index.find_generic(position, name)
             {
                 return LuaType::TplRef(Arc::new(GenericTpl::new(

@@ -10,10 +10,10 @@ use rowan::TextRange;
 use smol_str::SmolStr;
 
 use crate::{
-    AsyncState, DbIndex, FileId, InFiled, LuaAliasCallKind, LuaAliasCallType, LuaArrayLen,
-    LuaArrayType, LuaAttributeType, LuaFunctionType, LuaGenericType, LuaIndexAccessKey,
-    LuaIntersectionType, LuaMultiLineUnion, LuaObjectType, LuaStringTplType, LuaTupleStatus,
-    LuaTupleType, LuaType, LuaTypeDeclId, TypeOps, VariadicType,
+    AsyncState, DbIndex, FileId, InFiled, LuaAliasCallKind, LuaAliasCallType, LuaArgInferType,
+    LuaArrayLen, LuaArrayType, LuaAttributeType, LuaFunctionType, LuaGenericType,
+    LuaIndexAccessKey, LuaIntersectionType, LuaMultiLineUnion, LuaObjectType, LuaStringTplType,
+    LuaTupleStatus, LuaTupleType, LuaType, LuaTypeDeclId, TypeOps, VariadicType,
 };
 
 #[derive(Clone, Copy)]
@@ -151,6 +151,14 @@ fn infer_buildin_or_ref_type(
             LuaType::Table
         }
         _ => {
+            if let Some((is_arg_name, info)) = LuaArgInferType::try_from_doc_name(name) {
+                return if is_arg_name {
+                    LuaType::ArgNameInfer(Arc::new(info))
+                } else {
+                    LuaType::ArgStringInfer(Arc::new(info))
+                };
+            }
+
             let file_id = ctx.file_id;
             let type_id = if let Some(name_type_decl) =
                 ctx.db.get_type_index().find_type_decl(file_id, name)

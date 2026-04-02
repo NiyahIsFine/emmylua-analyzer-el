@@ -51,6 +51,20 @@ pub fn instantiate_type_generic(
                 LuaType::SelfInfer
             }
         }
+        LuaType::ArgNameInfer(info) => {
+            if let Some(t) = substitutor.get_arg_name_type(info) {
+                t.clone()
+            } else {
+                LuaType::Unknown
+            }
+        }
+        LuaType::ArgStringInfer(info) => {
+            if let Some(t) = substitutor.get_arg_string_type(info) {
+                t.clone()
+            } else {
+                LuaType::Unknown
+            }
+        }
         LuaType::TypeGuard(guard) => {
             let inner = instantiate_type_generic(db, guard.deref(), substitutor);
             LuaType::TypeGuard(inner.into())

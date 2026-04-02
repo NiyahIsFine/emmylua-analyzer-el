@@ -1,13 +1,13 @@
 use emmylua_parser::{LuaAstNode, LuaDocTypeList};
-use emmylua_parser::{LuaCallExpr, LuaExpr};
+use emmylua_parser::{LuaCallExpr, LuaExpr, LuaLiteralToken, PathTrait};
 use hashbrown::HashSet;
 use internment::ArcIntern;
 use std::{ops::Deref, sync::Arc};
 
 use crate::semantic::infer::infer_expr_list_types;
 use crate::{
-    DocTypeInferContext, FileId, GenericTpl, GenericTplId, LuaFunctionType, LuaGenericType,
-    TypeVisitTrait,
+    DocTypeInferContext, FileId, GenericTpl, GenericTplId, LuaArgInferType, LuaFunctionType,
+    LuaGenericType, LuaTypeDeclId, TypeVisitTrait,
     db_index::{DbIndex, LuaType},
     infer_doc_type,
     semantic::{
@@ -40,6 +40,8 @@ pub fn instantiate_func_generic(
     let file_id = cache.get_file_id().clone();
     let mut generic_tpls = HashSet::new();
     let mut contain_self = false;
+    let mut contain_arg_name: Vec<Arc<LuaArgInferType>> = Vec::new();
+    let mut contain_arg_string: Vec<Arc<LuaArgInferType>> = Vec::new();
     func.visit_type(&mut |t| match t {
         LuaType::TplRef(generic_tpl) | LuaType::ConstTplRef(generic_tpl) => {
             let tpl_id = generic_tpl.get_tpl_id();
@@ -52,6 +54,12 @@ pub fn instantiate_func_generic(
         }
         LuaType::SelfInfer => {
             contain_self = true;
+        }
+        LuaType::ArgNameInfer(info) => {
+            contain_arg_name.push(info.clone());
+        }
+        LuaType::ArgStringInfer(info) => {
+            contain_arg_string.push(info.clone());
         }
         _ => {}
     });
@@ -97,11 +105,61 @@ pub fn instantiate_func_generic(
         substitutor.add_self_type(self_type);
     }
 
+    for info in &contain_arg_name {
+        if let Some(resolved) = resolve_arg_name_from_exprs(info, &arg_exprs) {
+            substitutor.add_arg_name_type(info, resolved);
+        }
+    }
+    for info in &contain_arg_string {
+        if let Some(resolved) = resolve_arg_string_from_exprs(info, &arg_exprs) {
+            substitutor.add_arg_string_type(info, resolved);
+        }
+    }
+
     if let LuaType::DocFunction(f) = instantiate_doc_function(db, func, &substitutor) {
         Ok(f.deref().clone())
     } else {
         Ok(func.clone())
     }
+}
+
+/// Resolve a `UseArgNameX` annotation: take the X-th call argument (1-indexed),
+/// extract the last `.`-separated segment of its access path, and prepend the prefix.
+fn resolve_arg_name_from_exprs(info: &LuaArgInferType, args: &[LuaExpr]) -> Option<LuaType> {
+    let idx = (info.get_idx() as usize).checked_sub(1)?;
+    let arg_expr = args.get(idx)?;
+
+    // Must NOT be a string literal
+    if matches!(arg_expr, LuaExpr::LiteralExpr(_)) {
+        return None;
+    }
+
+    let access_path = match arg_expr {
+        LuaExpr::NameExpr(e) => e.get_access_path()?,
+        LuaExpr::IndexExpr(e) => e.get_access_path()?,
+        _ => return None,
+    };
+
+    let last_segment = access_path.rsplit('.').next().unwrap_or(&access_path);
+    let result_name = format!("{}{}", info.get_prefix(), last_segment);
+    Some(LuaType::Ref(LuaTypeDeclId::global(&result_name)))
+}
+
+/// Resolve a `UseArgStringX` annotation: take the X-th call argument (1-indexed) as a string
+/// literal, and prepend the prefix.
+fn resolve_arg_string_from_exprs(info: &LuaArgInferType, args: &[LuaExpr]) -> Option<LuaType> {
+    let idx = (info.get_idx() as usize).checked_sub(1)?;
+    let arg_expr = args.get(idx)?;
+
+    let LuaExpr::LiteralExpr(literal_expr) = arg_expr else {
+        return None;
+    };
+    let LuaLiteralToken::String(string_token) = literal_expr.get_literal()? else {
+        return None;
+    };
+    let string_value = string_token.get_value();
+    let result_name = format!("{}{}", info.get_prefix(), string_value);
+    Some(LuaType::Ref(LuaTypeDeclId::global(&result_name)))
 }
 
 fn apply_call_generic_type_list(

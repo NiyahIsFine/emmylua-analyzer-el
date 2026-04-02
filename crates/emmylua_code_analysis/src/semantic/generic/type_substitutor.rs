@@ -1,13 +1,17 @@
 use hashbrown::{HashMap, HashSet};
+use internment::ArcIntern;
+use smol_str::SmolStr;
 
 use super::tpl_pattern::constant_decay;
-use crate::{GenericTplId, LuaType, LuaTypeDeclId};
+use crate::{GenericTplId, LuaArgInferType, LuaType, LuaTypeDeclId};
 
 #[derive(Debug, Clone)]
 pub struct TypeSubstitutor {
     tpl_replace_map: HashMap<GenericTplId, SubstitutorValue>,
     alias_type_id: Option<LuaTypeDeclId>,
     self_type: Option<LuaType>,
+    arg_name_types: HashMap<(u8, ArcIntern<SmolStr>), LuaType>,
+    arg_string_types: HashMap<(u8, ArcIntern<SmolStr>), LuaType>,
 }
 
 impl Default for TypeSubstitutor {
@@ -22,6 +26,8 @@ impl TypeSubstitutor {
             tpl_replace_map: HashMap::new(),
             alias_type_id: None,
             self_type: None,
+            arg_name_types: HashMap::new(),
+            arg_string_types: HashMap::new(),
         }
     }
 
@@ -37,6 +43,8 @@ impl TypeSubstitutor {
             tpl_replace_map,
             alias_type_id: None,
             self_type: None,
+            arg_name_types: HashMap::new(),
+            arg_string_types: HashMap::new(),
         }
     }
 
@@ -52,6 +60,8 @@ impl TypeSubstitutor {
             tpl_replace_map,
             alias_type_id: Some(alias_type_id),
             self_type: None,
+            arg_name_types: HashMap::new(),
+            arg_string_types: HashMap::new(),
         }
     }
 
@@ -152,6 +162,26 @@ impl TypeSubstitutor {
 
     pub fn get_self_type(&self) -> Option<&LuaType> {
         self.self_type.as_ref()
+    }
+
+    pub fn add_arg_name_type(&mut self, info: &LuaArgInferType, ty: LuaType) {
+        self.arg_name_types
+            .insert((info.get_idx(), info.prefix.clone()), ty);
+    }
+
+    pub fn get_arg_name_type(&self, info: &LuaArgInferType) -> Option<&LuaType> {
+        self.arg_name_types
+            .get(&(info.get_idx(), info.prefix.clone()))
+    }
+
+    pub fn add_arg_string_type(&mut self, info: &LuaArgInferType, ty: LuaType) {
+        self.arg_string_types
+            .insert((info.get_idx(), info.prefix.clone()), ty);
+    }
+
+    pub fn get_arg_string_type(&self, info: &LuaArgInferType) -> Option<&LuaType> {
+        self.arg_string_types
+            .get(&(info.get_idx(), info.prefix.clone()))
     }
 }
 
