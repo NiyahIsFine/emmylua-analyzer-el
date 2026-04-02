@@ -368,4 +368,91 @@ mod test {
 
         assert_eq!(ws.expr_ty("result"), ws.ty("never"));
     }
+
+    /// Test that methods defined on a `---@type ClassName` local variable are
+    /// collected as members of `ClassName` (partial class contribution via @type).
+    #[test]
+    fn test_type_annotation_method_extends_class() {
+        let mut ws = VirtualWorkspace::new();
+        ws.def(
+            r#"
+        ---@class HomePlantBLL
+        local HomePlantBLL = {}
+
+        ---@type HomePlantBLL
+        local HomePlant_Inventory = {}
+
+        function HomePlant_Inventory:OnInit_Inventory()
+        end
+
+        ---@type HomePlantBLL
+        local inst = HomePlantBLL
+
+        R = inst.OnInit_Inventory
+        "#,
+        );
+
+        // The method defined on the @type-annotated variable should be
+        // visible on HomePlantBLL instances.
+        assert_ne!(ws.expr_ty("R"), LuaType::Nil);
+    }
+
+    /// Test that field assignments on a `---@type ClassName` variable do NOT
+    /// extend the class (only method definitions should).
+    #[test]
+    fn test_type_annotation_field_does_not_extend_class() {
+        let mut ws = VirtualWorkspace::new();
+        ws.def(
+            r#"
+        ---@class MyClass2
+        local MyClass2 = {}
+
+        ---@type MyClass2
+        local obj = {}
+        obj.someField = 42
+
+        ---@type MyClass2
+        local inst2 = MyClass2
+
+        R2 = inst2.someField
+        "#,
+        );
+
+        // Field assignments on @type-annotated variables should NOT extend the class.
+        assert_eq!(ws.expr_ty("R2"), LuaType::Nil);
+    }
+
+    /// Test that multi-file partial class pattern works with @type annotation.
+    #[test]
+    fn test_type_annotation_partial_class_multifile() {
+        let mut ws = VirtualWorkspace::new();
+        ws.def_file(
+            "main.lua",
+            r#"
+        ---@class BLL
+        local BLL = {}
+        "#,
+        );
+        ws.def_file(
+            "partial.lua",
+            r#"
+        ---@type BLL
+        local Partial = {}
+
+        function Partial:OnInit()
+        end
+        "#,
+        );
+        ws.def_file(
+            "usage.lua",
+            r#"
+        ---@type BLL
+        local bll = {}
+
+        R3 = bll.OnInit
+        "#,
+        );
+
+        assert_ne!(ws.expr_ty("R3"), LuaType::Nil);
+    }
 }

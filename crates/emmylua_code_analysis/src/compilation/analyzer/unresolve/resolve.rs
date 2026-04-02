@@ -13,7 +13,7 @@ use crate::{
         lua::{analyze_return_point, infer_for_range_iter_expr_func},
         unresolve::UnResolveConstructor,
     },
-    db_index::{DbIndex, LuaMemberOwner, LuaType},
+    db_index::{DbIndex, LuaMemberFeature, LuaMemberOwner, LuaType},
     find_members_with_key,
     semantic::{LuaInferCache, infer_expr},
 };
@@ -60,6 +60,32 @@ pub fn try_resolve_member(
                 LuaMemberOwner::Type(def_id)
             }
             LuaType::Instance(instance) => LuaMemberOwner::Element(instance.get_range().clone()),
+            LuaType::Ref(ref_id) => {
+                let member_id = unresolve_member.member_id;
+                // Only extend the class for method declarations (not field assignments).
+                // Field assignments on @type-annotated variables should trigger InjectField.
+                let is_method_decl = db
+                    .get_member_index()
+                    .get_member(&member_id)
+                    .map_or(false, |m| {
+                        matches!(
+                            m.get_feature(),
+                            LuaMemberFeature::FileMethodDecl | LuaMemberFeature::MetaMethodDecl
+                        )
+                    });
+                if !is_method_decl {
+                    return Ok(());
+                }
+                let type_decl = db
+                    .get_type_index()
+                    .get_type_decl(&ref_id)
+                    .ok_or(InferFailReason::None)?;
+                // if is exact type, no need to extend field
+                if type_decl.is_exact() {
+                    return Ok(());
+                }
+                LuaMemberOwner::Type(ref_id)
+            }
             // is ref need extend field?
             _ => {
                 return Ok(()); // Changed from return None to return Ok(())
