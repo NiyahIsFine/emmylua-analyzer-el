@@ -663,7 +663,7 @@ pub(crate) fn unwrapp_return_type(
             return Ok(LuaType::Unknown);
         }
         LuaType::ArgStringInfer(info) => {
-            if let Some(resolved) = resolve_arg_string_infer(info, &call_expr) {
+            if let Some(resolved) = resolve_arg_string_infer(info, &call_expr, db, cache) {
                 return Ok(resolved);
             }
             return Ok(LuaType::Unknown);
@@ -692,9 +692,9 @@ fn resolve_arg_name_infer(info: &LuaArgInferType, call_expr: &LuaCallExpr) -> Op
     resolve_arg_name_from_exprs(info, &args)
 }
 
-fn resolve_arg_string_infer(info: &LuaArgInferType, call_expr: &LuaCallExpr) -> Option<LuaType> {
+fn resolve_arg_string_infer(info: &LuaArgInferType, call_expr: &LuaCallExpr, db: &DbIndex, cache: &mut LuaInferCache) -> Option<LuaType> {
     let args: Vec<LuaExpr> = call_expr.get_args_list()?.get_args().collect();
-    resolve_arg_string_from_exprs(info, &args)
+    resolve_arg_string_from_exprs(info, &args, db, cache)
 }
 
 fn is_last_call_expr(call_expr: &LuaCallExpr) -> bool {

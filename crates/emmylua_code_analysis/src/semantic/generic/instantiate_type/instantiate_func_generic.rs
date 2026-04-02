@@ -111,7 +111,7 @@ pub fn instantiate_func_generic(
         }
     }
     for info in &contain_arg_string {
-        if let Some(resolved) = resolve_arg_string_from_exprs(info, &arg_exprs) {
+        if let Some(resolved) = resolve_arg_string_from_exprs(info, &arg_exprs, db, cache) {
             substitutor.add_arg_string_type(info, resolved);
         }
     }
@@ -151,17 +151,26 @@ pub fn resolve_arg_name_from_exprs(info: &LuaArgInferType, args: &[LuaExpr]) -> 
 pub fn resolve_arg_string_from_exprs(
     info: &LuaArgInferType,
     args: &[LuaExpr],
+    db: &DbIndex,
+    cache: &mut LuaInferCache,
 ) -> Option<LuaType> {
     let idx = (info.get_idx() as usize).checked_sub(1)?;
     let arg_expr = args.get(idx)?;
 
-    let LuaExpr::LiteralExpr(literal_expr) = arg_expr else {
-        return None;
+    let string_value: String = if let LuaExpr::LiteralExpr(literal_expr) = arg_expr {
+        if let Some(LuaLiteralToken::String(string_token)) = literal_expr.get_literal() {
+            string_token.get_value().to_string()
+        } else {
+            return None;
+        }
+    } else {
+        let inferred = infer_expr(db, cache, arg_expr.clone()).ok()?;
+        match inferred {
+            LuaType::StringConst(s) => s.to_string(),
+            _ => return None,
+        }
     };
-    let LuaLiteralToken::String(string_token) = literal_expr.get_literal()? else {
-        return None;
-    };
-    let string_value = string_token.get_value();
+
     let result_name = format!("{}{}", info.get_prefix(), string_value);
     Some(LuaType::Ref(LuaTypeDeclId::global(&result_name)))
 }
