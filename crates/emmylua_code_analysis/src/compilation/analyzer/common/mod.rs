@@ -2,8 +2,10 @@ mod migrate_global_member;
 use migrate_global_member::migrate_global_members_when_type_resolve;
 use rowan::TextRange;
 
+use emmylua_parser::{LuaAstNode, LuaExpr};
+
 use crate::{
-    InFiled, LuaMemberId, LuaTypeCache, LuaTypeOwner,
+    FileId, InFiled, LuaMemberId, LuaTypeCache, LuaTypeOwner,
     db_index::{DbIndex, LuaMemberOwner, LuaType, LuaTypeDeclId},
 };
 
@@ -99,4 +101,49 @@ fn get_owner_id(db: &DbIndex, type_owner: &LuaTypeOwner) -> Option<LuaMemberOwne
         LuaType::Instance(inst) => Some(LuaMemberOwner::Element(inst.get_range().clone())),
         _ => None,
     }
+}
+
+/// Returns `true` when `prefix_expr` is a global variable whose type was
+/// explicitly annotated with a doc-comment (`---@type X`, etc.), **and**
+/// the annotation is declared in the same file (`file_id`) as the call-site.
+///
+/// Only same-file assignments are treated as class-extension definitions
+/// (e.g. `---@type XX; XX = {}; XX.A1 = 1` in a single file).  Assignments
+/// from other files are treated as usage and should not extend the class.
+pub fn prefix_is_doc_annotated_global(
+    db: &DbIndex,
+    file_id: FileId,
+    prefix_expr: &LuaExpr,
+) -> bool {
+    let LuaExpr::NameExpr(name_expr) = prefix_expr else {
+        return false;
+    };
+    let name = match name_expr.get_name_text() {
+        Some(n) => n,
+        None => return false,
+    };
+    // A locally shadowed name does not refer to the global.
+    let is_shadowed = db
+        .get_decl_index()
+        .get_decl_tree(&file_id)
+        .and_then(|tree| tree.find_local_decl(&name, name_expr.get_position()))
+        .map(|decl| decl.is_local() || decl.is_implicit_self())
+        .unwrap_or(false);
+    if is_shadowed {
+        return false;
+    }
+    // Check whether a global decl for this name in the CURRENT file has a
+    // doc-type annotation.  Cross-file assignments are considered usage, not
+    // class definition.
+    if let Some(decl_ids) = db.get_global_index().get_global_decl_ids(&name) {
+        for decl_id in decl_ids {
+            if decl_id.file_id != file_id {
+                continue;
+            }
+            if let Some(type_cache) = db.get_type_index().get_type_cache(&(*decl_id).into()) {
+                return type_cache.is_doc();
+            }
+        }
+    }
+    false
 }

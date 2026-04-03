@@ -9,7 +9,7 @@ use crate::{
     LuaOperator, LuaOperatorMetaMethod, LuaOperatorOwner, LuaSemanticDeclId, LuaTypeCache,
     LuaTypeDeclId, OperatorFunction, SignatureReturnStatus, TypeOps,
     compilation::analyzer::{
-        common::{add_member, bind_type},
+        common::{add_member, bind_type, prefix_is_doc_annotated_global},
         lua::{analyze_return_point, infer_for_range_iter_expr_func},
         unresolve::UnResolveConstructor,
     },
@@ -62,8 +62,12 @@ pub fn try_resolve_member(
             LuaType::Instance(instance) => LuaMemberOwner::Element(instance.get_range().clone()),
             LuaType::Ref(ref_id) => {
                 let member_id = unresolve_member.member_id;
-                // Extend the class for method declarations, or for field assignments
-                // where the prefix is `self` (method body on a @type-annotated variable).
+                // Extend the class for:
+                // 1. method declarations (e.g. `function XX:Fun()`)
+                // 2. self-field assignments (`self.b = 1` inside a method)
+                // 3. non-method field assignments on a doc-annotated global
+                //    (`XX.A1 = 1` where `---@type XX`) — but NOT method decls,
+                //    those are handled by try_add_method_to_ref_type.
                 let is_method_decl = db
                     .get_member_index()
                     .get_member(&member_id)
@@ -78,7 +82,22 @@ pub fn try_resolve_member(
                         &unresolve_member.prefix,
                         Some(LuaExpr::NameExpr(n)) if n.get_name_text().as_deref() == Some("self")
                     );
-                if !is_method_decl && !is_self_field {
+                let is_doc_global_field = !is_method_decl
+                    && !is_self_field
+                    && unresolve_member.prefix.as_ref().is_some_and(|p| {
+                        prefix_is_doc_annotated_global(db, unresolve_member.file_id, p)
+                    })
+                    && db
+                        .get_member_index()
+                        .get_member(&member_id)
+                        .map_or(false, |m| {
+                            !matches!(
+                                m.get_feature(),
+                                LuaMemberFeature::FileMethodDecl
+                                    | LuaMemberFeature::MetaMethodDecl
+                            )
+                        });
+                if !is_method_decl && !is_self_field && !is_doc_global_field {
                     return Ok(());
                 }
                 let type_decl = db

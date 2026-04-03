@@ -264,7 +264,16 @@ mod test {
         "#,
         );
 
-        assert_eq!(ws.expr_ty("A"), LuaType::Nil);
+        // Foo is a global annotated with ---@type Foo.
+        // Field assignments like `Foo.extra = 1` extend class Foo (FileDefine feature),
+        // so `other.extra` (another instance of Foo) should be inferred.
+        let a_ty = ws.expr_ty("A");
+        assert_ne!(
+            a_ty,
+            LuaType::Nil,
+            "other.extra should be inferred after Foo.extra = 1 extends class Foo, got: {:?}",
+            a_ty
+        );
     }
 
     #[test]
@@ -639,6 +648,77 @@ TABLE1.M1 = 1
             LuaType::Unknown,
             "G4.x should be inferred when G4 and G4.x are in different files, got: {:?}",
             x_ty
+        );
+    }
+
+    // Test that non-method field assignments on a `---@type X`-annotated **global** variable
+    // extend class X so fields are visible in completion and type inference.
+    // e.g. `---@type XX; XX = {}; XX.A1 = 1` should add `A1` to class `XX`.
+    #[test]
+    fn test_at_type_annotated_global_field_extends_class() {
+        let mut ws = VirtualWorkspace::new();
+        ws.def(
+            r#"
+---@class XX
+
+---@type XX
+XX = {}
+XX.A1 = 1
+XX.A2 = 2
+"#,
+        );
+
+        let a1_ty = ws.expr_ty("XX.A1");
+        assert_ne!(
+            a1_ty,
+            LuaType::Unknown,
+            "XX.A1 should be inferred after @type-annotated global assignment extends class XX, got: {:?}",
+            a1_ty
+        );
+        assert_ne!(a1_ty, LuaType::Nil, "XX.A1 should not be nil, got: {:?}", a1_ty);
+    }
+
+    // Cross-file variant matching the user-reported scenario:
+    //   File B: defines class XX
+    //   File C: `---@type XX; XX = {}; XX.A1 = 1; XX.A2 = 2`
+    //   File A: `XX.A1` / `XX.A2` should be inferred
+    #[test]
+    fn test_at_type_annotated_global_cross_file_extends_class() {
+        let mut ws = VirtualWorkspace::new();
+        ws.def_files(vec![
+            (
+                "file_b.lua",
+                r#"
+---@class XX
+XX = "XX"
+"#,
+            ),
+            (
+                "file_c.lua",
+                r#"
+---@type XX
+XX = {}
+XX.A1 = 1
+XX.A2 = 2
+"#,
+            ),
+        ]);
+
+        let a1_ty = ws.expr_ty("XX.A1");
+        assert_ne!(
+            a1_ty,
+            LuaType::Unknown,
+            "XX.A1 should be inferred from cross-file @type-annotated global, got: {:?}",
+            a1_ty
+        );
+        assert_ne!(a1_ty, LuaType::Nil, "XX.A1 should not be nil, got: {:?}", a1_ty);
+
+        let a2_ty = ws.expr_ty("XX.A2");
+        assert_ne!(
+            a2_ty,
+            LuaType::Unknown,
+            "XX.A2 should be inferred from cross-file @type-annotated global, got: {:?}",
+            a2_ty
         );
     }
 }
