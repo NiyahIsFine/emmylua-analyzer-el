@@ -594,4 +594,51 @@ mod test {
             d_ty
         );
     }
+
+    // Test that accessing global table members from file_b works even when
+    // table definition and member assignments are in file_a (single-file update path).
+    #[test]
+    fn test_cross_file_global_member_via_single_file_update() {
+        let mut ws = VirtualWorkspace::new();
+        ws.def_file(
+            "file_a.lua",
+            r#"
+TABLE1 = {}
+TABLE1.M1 = 1
+"#,
+        );
+
+        let m1_ty = ws.expr_ty("TABLE1.M1");
+        assert_ne!(
+            m1_ty,
+            LuaType::Unknown,
+            "TABLE1.M1 should be inferred after def_file, got: {:?}",
+            m1_ty
+        );
+        assert_ne!(
+            m1_ty,
+            LuaType::Nil,
+            "TABLE1.M1 should not be nil, got: {:?}",
+            m1_ty
+        );
+    }
+
+    // Test that table defined in one file and members defined in another file are
+    // accessible from a third file (split-definition pattern).
+    #[test]
+    fn test_cross_file_split_definition() {
+        let mut ws = VirtualWorkspace::new();
+        ws.def_files(vec![
+            ("file_a.lua", "G4 = {}"),
+            ("file_b.lua", "G4.x = 10"),
+        ]);
+
+        let x_ty = ws.expr_ty("G4.x");
+        assert_ne!(
+            x_ty,
+            LuaType::Unknown,
+            "G4.x should be inferred when G4 and G4.x are in different files, got: {:?}",
+            x_ty
+        );
+    }
 }
