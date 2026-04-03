@@ -14,7 +14,7 @@ use super::{
 use crate::{
     InFiled, JsonSchemaFile, LuaOperatorMetaMethod, LuaTypeCache, LuaTypeOwner, OperatorFunction,
     SignatureReturnStatus, TypeOps,
-    compilation::analyzer::common::bind_type,
+    compilation::analyzer::common::{bind_type, trigger_global_member_migration},
     db_index::{
         LuaDeclId, LuaDocParamInfo, LuaDocReturnInfo, LuaDocReturnOverloadInfo, LuaMemberId,
         LuaOperator, LuaSemanticDeclId, LuaSignatureId, LuaType,
@@ -71,6 +71,15 @@ fn bind_type_to_owner(
                             .db
                             .get_type_index_mut()
                             .bind_type(decl_id.into(), LuaTypeCache::DocType(type_ref.clone()));
+
+                        // Trigger global-member migration so that members already registered
+                        // under other global decls for the same name (e.g. a plain
+                        // `XX = {}; XX.A = 1` in another file) are migrated to the class
+                        // declared by this `---@type` annotation.
+                        trigger_global_member_migration(
+                            analyzer.db,
+                            LuaTypeOwner::Decl(decl_id),
+                        );
 
                         // bind description
                         if let Some(ref desc) = description

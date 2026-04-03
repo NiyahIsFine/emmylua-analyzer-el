@@ -1,5 +1,6 @@
 mod migrate_global_member;
 use migrate_global_member::migrate_global_members_when_type_resolve;
+pub(crate) use migrate_global_member::migrate_global_members_when_type_resolve as trigger_global_member_migration;
 use rowan::TextRange;
 
 use emmylua_parser::{LuaAstNode, LuaExpr};
@@ -146,4 +147,54 @@ pub fn prefix_is_doc_annotated_global(
         }
     }
     false
+}
+
+/// Returns `true` when `prefix_expr` is a global variable **and** the current
+/// file (`file_id`) contains a global declaration (i.e. an assignment like
+/// `XX = …`) for that name.
+///
+/// This is broader than [`prefix_is_doc_annotated_global`]: it triggers for
+/// *any* file that "owns" the global — whether or not it has a `---@type`
+/// annotation.  This covers the module-definition pattern:
+///
+/// ```lua
+/// -- file_a.lua  (no annotation)
+/// XX = {}
+/// XX.A = 1        -- ← this file owns XX, so A should extend class XX
+/// ```
+///
+/// It does *not* trigger in unrelated files that merely read/write the global
+/// without declaring it:
+///
+/// ```lua
+/// -- usage_file.lua
+/// XX.SomeCall()   -- XX has no global decl here → no extension
+/// ```
+pub fn prefix_has_global_decl_in_file(
+    db: &DbIndex,
+    file_id: FileId,
+    prefix_expr: &LuaExpr,
+) -> bool {
+    let LuaExpr::NameExpr(name_expr) = prefix_expr else {
+        return false;
+    };
+    let name = match name_expr.get_name_text() {
+        Some(n) => n,
+        None => return false,
+    };
+    // A locally-shadowed name does not refer to the global.
+    let is_local = db
+        .get_decl_index()
+        .get_decl_tree(&file_id)
+        .and_then(|tree| tree.find_local_decl(&name, name_expr.get_position()))
+        .map(|decl| decl.is_local() || decl.is_implicit_self())
+        .unwrap_or(false);
+    if is_local {
+        return false;
+    }
+    // The current file must contain at least one global declaration for `name`.
+    db.get_global_index()
+        .get_global_decl_ids(&name)
+        .map(|ids| ids.iter().any(|id| id.file_id == file_id))
+        .unwrap_or(false)
 }

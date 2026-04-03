@@ -7,7 +7,7 @@ use emmylua_parser::{
 use crate::{
     InFiled, InferFailReason, LuaMemberKey, LuaSemanticDeclId, LuaTypeCache, LuaTypeOwner,
     compilation::analyzer::{
-        common::{add_member, bind_type, prefix_is_doc_annotated_global},
+        common::{add_member, bind_type, prefix_has_global_decl_in_file, prefix_is_doc_annotated_global},
         unresolve::{UnResolveDecl, UnResolveMember},
     },
     db_index::{LuaDeclId, LuaMember, LuaMemberFeature, LuaMemberId, LuaMemberOwner, LuaType},
@@ -223,16 +223,27 @@ fn set_index_expr_owner(analyzer: &mut LuaAnalyzer, var_expr: LuaVarExpr) -> Opt
                         && let Some(decl_ids) =
                             analyzer.db.get_global_index().get_global_decl_ids(&name)
                     {
-                        // Pick the first resolvable global type cache as the owner type.
+                        // Prefer DocType (explicit `---@type` annotation) over inferred types so
+                        // that e.g. `---@type XX` in another file beats a plain `XX = {}` in the
+                        // current file.  Without this preference the loop would pick up the first
+                        // InferType it sees and stop, hiding the authoritative DocType.
+                        let mut infer_fallback: Option<LuaType> = None;
                         for decl_id in decl_ids {
                             if let Some(type_cache) = analyzer
                                 .db
                                 .get_type_index()
                                 .get_type_cache(&(*decl_id).into())
                             {
-                                explicit_type = Some(type_cache.as_type().clone());
-                                break;
+                                if type_cache.is_doc() {
+                                    explicit_type = Some(type_cache.as_type().clone());
+                                    break; // DocType wins immediately
+                                } else if infer_fallback.is_none() {
+                                    infer_fallback = Some(type_cache.as_type().clone());
+                                }
                             }
+                        }
+                        if explicit_type.is_none() {
+                            explicit_type = infer_fallback;
                         }
                     }
                 }
@@ -272,7 +283,12 @@ fn set_index_expr_owner(analyzer: &mut LuaAnalyzer, var_expr: LuaVarExpr) -> Opt
                     // handled by try_add_method_to_ref_type; adding them here too would
                     // duplicate the entry already registered by that function.
                     let is_doc_global_field = !is_self_prefix
-                        && prefix_is_doc_annotated_global(analyzer.db, file_id, &prefix_expr)
+                        && (prefix_is_doc_annotated_global(analyzer.db, file_id, &prefix_expr)
+                            || prefix_has_global_decl_in_file(
+                                analyzer.db,
+                                file_id,
+                                &prefix_expr,
+                            ))
                         && analyzer
                             .db
                             .get_member_index()

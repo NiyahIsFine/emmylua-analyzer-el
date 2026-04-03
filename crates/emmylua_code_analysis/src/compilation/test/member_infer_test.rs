@@ -721,4 +721,102 @@ XX.A2 = 2
             a2_ty
         );
     }
+
+    // User-reported scenario (problem statement):
+    // File A: plain table `XX = {}; XX.A = 1; XX.B = 2; XX.C = 3`  (no annotation)
+    // File B: `---@class XX Desc` defined somewhere
+    // File C: `---@type XX Des; XX = require("A")`
+    // File D: `XX.` should complete A, B, C
+    //
+    // This tests both file analysis orderings (file_a before file_c and vice versa).
+    #[test]
+    fn test_at_type_annotated_global_require_cross_file() {
+        // Order 1: plain table file analyzed before the @type file.
+        let mut ws = VirtualWorkspace::new();
+        ws.def_files(vec![
+            (
+                "file_b.lua",
+                r#"
+---@class XX
+"#,
+            ),
+            (
+                "file_a.lua",
+                r#"
+XX = {}
+XX.A = 1
+XX.B = 2
+XX.C = 3
+"#,
+            ),
+            (
+                "file_c.lua",
+                r#"
+---@type XX
+XX = require("file_a")
+"#,
+            ),
+        ]);
+
+        let a_ty = ws.expr_ty("XX.A");
+        assert_ne!(
+            a_ty,
+            LuaType::Unknown,
+            "XX.A should be inferred when plain table is in file_a and @type XX is in file_c (order 1), got: {:?}",
+            a_ty
+        );
+        assert_ne!(a_ty, LuaType::Nil, "XX.A should not be nil (order 1), got: {:?}", a_ty);
+
+        let c_ty = ws.expr_ty("XX.C");
+        assert_ne!(
+            c_ty,
+            LuaType::Unknown,
+            "XX.C should be inferred (order 1), got: {:?}",
+            c_ty
+        );
+    }
+
+    #[test]
+    fn test_at_type_annotated_global_require_cross_file_reversed() {
+        // Order 2: @type file analyzed before the plain table file.
+        let mut ws = VirtualWorkspace::new();
+        ws.def_files(vec![
+            (
+                "file_b.lua",
+                r#"
+---@class XX
+"#,
+            ),
+            (
+                "file_c.lua",
+                r#"
+---@type XX
+XX = require("file_a")
+"#,
+            ),
+            (
+                "file_a.lua",
+                r#"
+XX = {}
+XX.A = 1
+XX.B = 2
+XX.C = 3
+"#,
+            ),
+        ]);
+
+        let a_ty = ws.expr_ty("XX.A");
+        assert_ne!(
+            a_ty,
+            LuaType::Unknown,
+            "XX.A should be inferred when plain table file_a is analyzed after @type file_c, got: {:?}",
+            a_ty
+        );
+        assert_ne!(
+            a_ty,
+            LuaType::Nil,
+            "XX.A should not be nil (order 2), got: {:?}",
+            a_ty
+        );
+    }
 }

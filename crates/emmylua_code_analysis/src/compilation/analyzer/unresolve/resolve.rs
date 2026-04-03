@@ -9,7 +9,7 @@ use crate::{
     LuaOperator, LuaOperatorMetaMethod, LuaOperatorOwner, LuaSemanticDeclId, LuaTypeCache,
     LuaTypeDeclId, OperatorFunction, SignatureReturnStatus, TypeOps,
     compilation::analyzer::{
-        common::{add_member, bind_type, prefix_is_doc_annotated_global},
+        common::{add_member, bind_type, prefix_has_global_decl_in_file, prefix_is_doc_annotated_global},
         lua::{analyze_return_point, infer_for_range_iter_expr_func},
         unresolve::UnResolveConstructor,
     },
@@ -86,6 +86,7 @@ pub fn try_resolve_member(
                     && !is_self_field
                     && unresolve_member.prefix.as_ref().is_some_and(|p| {
                         prefix_is_doc_annotated_global(db, unresolve_member.file_id, p)
+                            || prefix_has_global_decl_in_file(db, unresolve_member.file_id, p)
                     })
                     && db
                         .get_member_index()
