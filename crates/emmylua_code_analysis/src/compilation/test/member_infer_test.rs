@@ -397,10 +397,10 @@ mod test {
         assert_ne!(ws.expr_ty("R"), LuaType::Nil);
     }
 
-    /// Test that field assignments on a `---@type ClassName` variable do NOT
-    /// extend the class (only method definitions should).
+    /// Test that field assignments on a `---@type ClassName` variable extend the class,
+    /// making those fields accessible on other instances of the class.
     #[test]
-    fn test_type_annotation_field_does_not_extend_class() {
+    fn test_type_annotation_field_extends_class() {
         let mut ws = VirtualWorkspace::new();
         ws.def(
             r#"
@@ -418,8 +418,20 @@ mod test {
         "#,
         );
 
-        // Field assignments on @type-annotated variables should NOT extend the class.
-        assert_eq!(ws.expr_ty("R2"), LuaType::Nil);
+        // Field assignments on @type-annotated variables should extend the class.
+        let r2_ty = ws.expr_ty("R2");
+        assert_ne!(
+            r2_ty,
+            LuaType::Nil,
+            "someField should be accessible on other instances of MyClass2 after @type-annotated assignment, got: {:?}",
+            r2_ty
+        );
+        assert_ne!(
+            r2_ty,
+            LuaType::Unknown,
+            "someField type should be inferred, got: {:?}",
+            r2_ty
+        );
     }
 
     /// Test that multi-file partial class pattern works with @type annotation.
@@ -639,6 +651,71 @@ TABLE1.M1 = 1
             LuaType::Unknown,
             "G4.x should be inferred when G4 and G4.x are in different files, got: {:?}",
             x_ty
+        );
+    }
+
+    // Test that a `---@type X`-annotated local variable's direct field assignments extend class X.
+    // e.g. `---@type X; local x2 = {}; x2.g2 = 1` should add `g2` to class X.
+    #[test]
+    fn test_at_type_annotated_local_field_extends_class() {
+        let mut ws = VirtualWorkspace::new();
+        ws.def(
+            r#"
+---@class X
+local x = {}
+x.g1 = 1
+
+---@type X
+local x2 = {}
+x2.g2 = 2
+"#,
+        );
+
+        // x2.g2 should have been added to class X's members
+        let g2_ty = ws.expr_ty("x.g2");
+        assert_ne!(
+            g2_ty,
+            LuaType::Unknown,
+            "x.g2 should be inferred — x2.g2 should extend class X, got: {:?}",
+            g2_ty
+        );
+        assert_ne!(
+            g2_ty,
+            LuaType::Nil,
+            "x.g2 should not be nil, got: {:?}",
+            g2_ty
+        );
+    }
+
+    // Cross-file variant: class X defined in file A, @type-annotated variable in file B.
+    #[test]
+    fn test_at_type_annotated_local_cross_file_extends_class() {
+        let mut ws = VirtualWorkspace::new();
+        ws.def_files(vec![
+            (
+                "file_a.lua",
+                r#"
+---@class X
+local x = {}
+x.g1 = 1
+"#,
+            ),
+            (
+                "file_b.lua",
+                r#"
+---@type X
+local x2 = {}
+x2.g2 = 2
+"#,
+            ),
+        ]);
+
+        let g2_ty = ws.expr_ty("x2.g2");
+        assert_ne!(
+            g2_ty,
+            LuaType::Unknown,
+            "Cross-file x2.g2 should be inferred after @type annotation extends class X, got: {:?}",
+            g2_ty
         );
     }
 }

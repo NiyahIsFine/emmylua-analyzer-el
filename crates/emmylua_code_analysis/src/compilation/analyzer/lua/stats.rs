@@ -7,7 +7,7 @@ use emmylua_parser::{
 use crate::{
     InFiled, InferFailReason, LuaMemberKey, LuaSemanticDeclId, LuaTypeCache, LuaTypeOwner,
     compilation::analyzer::{
-        common::{add_member, bind_type},
+        common::{add_member, bind_type, prefix_is_doc_annotated_local},
         unresolve::{UnResolveDecl, UnResolveMember},
     },
     db_index::{LuaDeclId, LuaMember, LuaMemberFeature, LuaMemberId, LuaMemberOwner, LuaType},
@@ -253,15 +253,17 @@ fn set_index_expr_owner(analyzer: &mut LuaAnalyzer, var_expr: LuaVarExpr) -> Opt
                     LuaMemberOwner::Element(instance.get_range().clone())
                 }
                 LuaType::Ref(ref_id) => {
-                    // When `self` is typed as a Ref (e.g. inside a method on a
-                    // `---@type ClassName` variable), field assignments to `self`
-                    // should extend the class so members like `self.x2 = 2` are visible.
+                    // Extend the class when:
+                    // 1. `self` is the prefix (inside a method body), OR
+                    // 2. the prefix is a `---@type ClassName`-annotated local variable.
                     let is_self_prefix = matches!(
                         &prefix_expr,
                         LuaExpr::NameExpr(n) if n.get_name_text().as_deref() == Some("self")
                     );
+                    let should_extend = is_self_prefix
+                        || prefix_is_doc_annotated_local(analyzer.db, file_id, &prefix_expr);
                     let member_owner = LuaMemberOwner::Type(ref_id);
-                    if is_self_prefix {
+                    if should_extend {
                         add_member(analyzer.db, member_owner, member_id);
                     } else {
                         analyzer.db.get_member_index_mut().set_member_owner(
