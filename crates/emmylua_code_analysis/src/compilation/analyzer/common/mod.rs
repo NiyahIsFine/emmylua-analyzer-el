@@ -2,11 +2,8 @@ mod migrate_global_member;
 use migrate_global_member::migrate_global_members_when_type_resolve;
 use rowan::TextRange;
 
-use emmylua_parser::{LuaAstNode, LuaExpr};
-use rowan::TextSize;
-
 use crate::{
-    FileId, InFiled, LuaMemberId, LuaTypeCache, LuaTypeOwner,
+    InFiled, LuaMemberId, LuaTypeCache, LuaTypeOwner,
     db_index::{DbIndex, LuaMemberOwner, LuaType, LuaTypeDeclId},
 };
 
@@ -102,39 +99,4 @@ fn get_owner_id(db: &DbIndex, type_owner: &LuaTypeOwner) -> Option<LuaMemberOwne
         LuaType::Instance(inst) => Some(LuaMemberOwner::Element(inst.get_range().clone())),
         _ => None,
     }
-}
-
-/// Returns `true` if `prefix_expr` is a local variable whose type was explicitly
-/// annotated with a doc-comment (`---@type`, `---@param`, etc.), i.e. its type
-/// cache entry is `LuaTypeCache::DocType`.  Used to decide whether field
-/// assignments like `x2.g2 = 1` (where `x2: ---@type X`) should extend class X.
-pub fn prefix_is_doc_annotated_local(
-    db: &DbIndex,
-    file_id: FileId,
-    prefix_expr: &LuaExpr,
-) -> bool {
-    let LuaExpr::NameExpr(name_expr) = prefix_expr else {
-        return false;
-    };
-    let name = match name_expr.get_name_text() {
-        Some(n) => n,
-        None => return false,
-    };
-    if name == "self" {
-        return false;
-    }
-    let position: TextSize = name_expr.get_position();
-    let local_decl_id = db
-        .get_decl_index()
-        .get_decl_tree(&file_id)
-        .and_then(|tree| tree.find_local_decl(&name, position))
-        .filter(|d| d.is_local())
-        .map(|d| d.get_id());
-    let Some(decl_id) = local_decl_id else {
-        return false;
-    };
-    db.get_type_index()
-        .get_type_cache(&decl_id.into())
-        .map(|c| c.is_doc())
-        .unwrap_or(false)
 }

@@ -19,9 +19,7 @@ mod test {
     #[test]
     fn test_inject_field() {
         let mut ws = VirtualWorkspace::new();
-        // Field assignments on @type-annotated variables extend the class,
-        // so InjectField diagnostic should NOT be triggered.
-        assert!(ws.check_code_for(
+        assert!(!ws.check_code_for(
             DiagnosticCode::InjectField,
             r#"
             ---@class test1
