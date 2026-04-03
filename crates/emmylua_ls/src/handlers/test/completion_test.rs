@@ -2417,4 +2417,35 @@ mod tests {
 
         Ok(())
     }
+
+    #[gtest]
+    fn test_cross_file_global_table_in_method() -> Result<()> {
+        let mut ws = ProviderVirtualWorkspace::new();
+        ws.def_file(
+            "file_a.lua",
+            r#"
+            G1 = {}
+            G1.a = 1
+            function XX:Fun()
+                local x = G1.a
+            end
+            "#,
+        );
+
+        // In File B (via check_completion), inside a method function, G1.a should be accessible
+        check!(ws.check_completion(
+            r#"
+            function XX2:Fun2()
+                G1.<??>
+            end
+            "#,
+            vec![VirtualCompletionItem {
+                label: "a".to_string(),
+                kind: CompletionItemKind::CONSTANT,
+                ..Default::default()
+            }],
+        ));
+
+        Ok(())
+    }
 }

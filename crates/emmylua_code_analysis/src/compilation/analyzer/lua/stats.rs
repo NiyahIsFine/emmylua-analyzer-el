@@ -7,7 +7,7 @@ use emmylua_parser::{
 use crate::{
     InFiled, InferFailReason, LuaMemberKey, LuaSemanticDeclId, LuaTypeCache, LuaTypeOwner,
     compilation::analyzer::{
-        common::{add_member, bind_type},
+        common::{add_member, bind_type, prefix_has_global_decl_in_file, prefix_is_doc_annotated_global},
         unresolve::{UnResolveDecl, UnResolveMember},
     },
     db_index::{LuaDeclId, LuaMember, LuaMemberFeature, LuaMemberId, LuaMemberOwner, LuaType},
@@ -223,16 +223,27 @@ fn set_index_expr_owner(analyzer: &mut LuaAnalyzer, var_expr: LuaVarExpr) -> Opt
                         && let Some(decl_ids) =
                             analyzer.db.get_global_index().get_global_decl_ids(&name)
                     {
-                        // Pick the first resolvable global type cache as the owner type.
+                        // Prefer DocType (explicit `---@type` annotation) over inferred types so
+                        // that e.g. `---@type XX` in another file beats a plain `XX = {}` in the
+                        // current file.  Without this preference the loop would pick up the first
+                        // InferType it sees and stop, hiding the authoritative DocType.
+                        let mut infer_fallback: Option<LuaType> = None;
                         for decl_id in decl_ids {
                             if let Some(type_cache) = analyzer
                                 .db
                                 .get_type_index()
                                 .get_type_cache(&(*decl_id).into())
                             {
-                                explicit_type = Some(type_cache.as_type().clone());
-                                break;
+                                if type_cache.is_doc() {
+                                    explicit_type = Some(type_cache.as_type().clone());
+                                    break; // DocType wins immediately
+                                } else if infer_fallback.is_none() {
+                                    infer_fallback = Some(type_cache.as_type().clone());
+                                }
                             }
+                        }
+                        if explicit_type.is_none() {
+                            explicit_type = infer_fallback;
                         }
                     }
                 }
@@ -256,12 +267,41 @@ fn set_index_expr_owner(analyzer: &mut LuaAnalyzer, var_expr: LuaVarExpr) -> Opt
                     // When `self` is typed as a Ref (e.g. inside a method on a
                     // `---@type ClassName` variable), field assignments to `self`
                     // should extend the class so members like `self.x2 = 2` are visible.
+                    //
+                    // Likewise, direct field assignments on a global variable whose
+                    // type is doc-annotated (`---@type XX` + `XX.A1 = 1`) should extend
+                    // the class, but only for non-method members.  Method declarations
+                    // (`function XX.method() end`) are already handled by
+                    // `try_add_method_to_ref_type`; adding them here too would duplicate
+                    // the entry already registered by that function.
                     let is_self_prefix = matches!(
                         &prefix_expr,
                         LuaExpr::NameExpr(n) if n.get_name_text().as_deref() == Some("self")
                     );
+                    // For doc-annotated globals, only extend for non-method-decl members
+                    // (FileDefine / FileFieldDecl).  Method members (FileMethodDecl) are
+                    // handled by try_add_method_to_ref_type; adding them here too would
+                    // duplicate the entry already registered by that function.
+                    let is_doc_global_field = !is_self_prefix
+                        && (prefix_is_doc_annotated_global(analyzer.db, file_id, &prefix_expr)
+                            || prefix_has_global_decl_in_file(
+                                analyzer.db,
+                                file_id,
+                                &prefix_expr,
+                            ))
+                        && analyzer
+                            .db
+                            .get_member_index()
+                            .get_member(&member_id)
+                            .map_or(false, |m| {
+                                !matches!(
+                                    m.get_feature(),
+                                    LuaMemberFeature::FileMethodDecl
+                                        | LuaMemberFeature::MetaMethodDecl
+                                )
+                            });
                     let member_owner = LuaMemberOwner::Type(ref_id);
-                    if is_self_prefix {
+                    if is_self_prefix || is_doc_global_field {
                         add_member(analyzer.db, member_owner, member_id);
                     } else {
                         analyzer.db.get_member_index_mut().set_member_owner(

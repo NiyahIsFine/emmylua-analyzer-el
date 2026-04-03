@@ -264,7 +264,16 @@ mod test {
         "#,
         );
 
-        assert_eq!(ws.expr_ty("A"), LuaType::Nil);
+        // Foo is a global annotated with ---@type Foo.
+        // Field assignments like `Foo.extra = 1` extend class Foo (FileDefine feature),
+        // so `other.extra` (another instance of Foo) should be inferred.
+        let a_ty = ws.expr_ty("A");
+        assert_ne!(
+            a_ty,
+            LuaType::Nil,
+            "other.extra should be inferred after Foo.extra = 1 extends class Foo, got: {:?}",
+            a_ty
+        );
     }
 
     #[test]
@@ -488,5 +497,326 @@ mod test {
         // Both x (from @class method) and x2 (from @type method) should be visible
         assert_ne!(ws.expr_ty("R_x"), LuaType::Nil);
         assert_ne!(ws.expr_ty("R_x2"), LuaType::Nil);
+    }
+
+    #[test]
+    fn test_cross_file_global_table_member() {
+        let mut ws = VirtualWorkspace::new();
+
+        ws.def(
+            r#"
+        G1 = {}
+        G1.a = 1
+        "#,
+        );
+
+        ws.def(
+            r#"
+        B = G1.a
+        "#,
+        );
+
+        let b_ty = ws.expr_ty("B");
+        assert_ne!(
+            b_ty,
+            LuaType::Unknown,
+            "Cross-file global table member should be inferred, got: {:?}",
+            b_ty
+        );
+        assert_ne!(
+            b_ty,
+            LuaType::Nil,
+            "Cross-file global table member should not be nil, got: {:?}",
+            b_ty
+        );
+    }
+
+    #[test]
+    fn test_cross_file_global_table_member_batch_load() {
+        let mut ws = VirtualWorkspace::new();
+
+        ws.def_files(vec![
+            (
+                "file_a.lua",
+                r#"
+        G2 = {}
+        G2.b = 2
+        "#,
+            ),
+            (
+                "file_b.lua",
+                r#"
+        C = G2.b
+        "#,
+            ),
+        ]);
+
+        let c_ty = ws.expr_ty("C");
+        assert_ne!(
+            c_ty,
+            LuaType::Unknown,
+            "Batch-loaded cross-file global table member should be inferred, got: {:?}",
+            c_ty
+        );
+        assert_ne!(
+            c_ty,
+            LuaType::Nil,
+            "Batch-loaded cross-file global table member should not be nil, got: {:?}",
+            c_ty
+        );
+    }
+
+    // Test with reversed file order (file_b defines the usage, file_a defines the global).
+    // In a sorted batch load, file_b (lower FileId) may be processed before file_a.
+    #[test]
+    fn test_cross_file_global_table_member_reverse_order() {
+        let mut ws = VirtualWorkspace::new();
+
+        // file_b.lua is given first, so it gets a lower FileId and is analyzed first
+        ws.def_files(vec![
+            (
+                "file_b.lua",
+                r#"
+        D = G3.c
+        "#,
+            ),
+            (
+                "file_a.lua",
+                r#"
+        G3 = {}
+        G3.c = 3
+        "#,
+            ),
+        ]);
+
+        let d_ty = ws.expr_ty("D");
+        assert_ne!(
+            d_ty,
+            LuaType::Unknown,
+            "Reverse-order cross-file global table member should be inferred, got: {:?}",
+            d_ty
+        );
+        assert_ne!(
+            d_ty,
+            LuaType::Nil,
+            "Reverse-order cross-file global table member should not be nil, got: {:?}",
+            d_ty
+        );
+    }
+
+    // Test that accessing global table members from file_b works even when
+    // table definition and member assignments are in file_a (single-file update path).
+    #[test]
+    fn test_cross_file_global_member_via_single_file_update() {
+        let mut ws = VirtualWorkspace::new();
+        ws.def_file(
+            "file_a.lua",
+            r#"
+TABLE1 = {}
+TABLE1.M1 = 1
+"#,
+        );
+
+        let m1_ty = ws.expr_ty("TABLE1.M1");
+        assert_ne!(
+            m1_ty,
+            LuaType::Unknown,
+            "TABLE1.M1 should be inferred after def_file, got: {:?}",
+            m1_ty
+        );
+        assert_ne!(
+            m1_ty,
+            LuaType::Nil,
+            "TABLE1.M1 should not be nil, got: {:?}",
+            m1_ty
+        );
+    }
+
+    // Test that table defined in one file and members defined in another file are
+    // accessible from a third file (split-definition pattern).
+    #[test]
+    fn test_cross_file_split_definition() {
+        let mut ws = VirtualWorkspace::new();
+        ws.def_files(vec![
+            ("file_a.lua", "G4 = {}"),
+            ("file_b.lua", "G4.x = 10"),
+        ]);
+
+        let x_ty = ws.expr_ty("G4.x");
+        assert_ne!(
+            x_ty,
+            LuaType::Unknown,
+            "G4.x should be inferred when G4 and G4.x are in different files, got: {:?}",
+            x_ty
+        );
+    }
+
+    // Test that non-method field assignments on a `---@type X`-annotated **global** variable
+    // extend class X so fields are visible in completion and type inference.
+    // e.g. `---@type XX; XX = {}; XX.A1 = 1` should add `A1` to class `XX`.
+    #[test]
+    fn test_at_type_annotated_global_field_extends_class() {
+        let mut ws = VirtualWorkspace::new();
+        ws.def(
+            r#"
+---@class XX
+
+---@type XX
+XX = {}
+XX.A1 = 1
+XX.A2 = 2
+"#,
+        );
+
+        let a1_ty = ws.expr_ty("XX.A1");
+        assert_ne!(
+            a1_ty,
+            LuaType::Unknown,
+            "XX.A1 should be inferred after @type-annotated global assignment extends class XX, got: {:?}",
+            a1_ty
+        );
+        assert_ne!(a1_ty, LuaType::Nil, "XX.A1 should not be nil, got: {:?}", a1_ty);
+    }
+
+    // Cross-file variant matching the user-reported scenario:
+    //   File B: defines class XX
+    //   File C: `---@type XX; XX = {}; XX.A1 = 1; XX.A2 = 2`
+    //   File A: `XX.A1` / `XX.A2` should be inferred
+    #[test]
+    fn test_at_type_annotated_global_cross_file_extends_class() {
+        let mut ws = VirtualWorkspace::new();
+        ws.def_files(vec![
+            (
+                "file_b.lua",
+                r#"
+---@class XX
+XX = "XX"
+"#,
+            ),
+            (
+                "file_c.lua",
+                r#"
+---@type XX
+XX = {}
+XX.A1 = 1
+XX.A2 = 2
+"#,
+            ),
+        ]);
+
+        let a1_ty = ws.expr_ty("XX.A1");
+        assert_ne!(
+            a1_ty,
+            LuaType::Unknown,
+            "XX.A1 should be inferred from cross-file @type-annotated global, got: {:?}",
+            a1_ty
+        );
+        assert_ne!(a1_ty, LuaType::Nil, "XX.A1 should not be nil, got: {:?}", a1_ty);
+
+        let a2_ty = ws.expr_ty("XX.A2");
+        assert_ne!(
+            a2_ty,
+            LuaType::Unknown,
+            "XX.A2 should be inferred from cross-file @type-annotated global, got: {:?}",
+            a2_ty
+        );
+    }
+
+    // User-reported scenario (problem statement):
+    // File A: plain table `XX = {}; XX.A = 1; XX.B = 2; XX.C = 3`  (no annotation)
+    // File B: `---@class XX Desc` defined somewhere
+    // File C: `---@type XX Des; XX = require("A")`
+    // File D: `XX.` should complete A, B, C
+    //
+    // This tests both file analysis orderings (file_a before file_c and vice versa).
+    #[test]
+    fn test_at_type_annotated_global_require_cross_file() {
+        // Order 1: plain table file analyzed before the @type file.
+        let mut ws = VirtualWorkspace::new();
+        ws.def_files(vec![
+            (
+                "file_b.lua",
+                r#"
+---@class XX
+"#,
+            ),
+            (
+                "file_a.lua",
+                r#"
+XX = {}
+XX.A = 1
+XX.B = 2
+XX.C = 3
+"#,
+            ),
+            (
+                "file_c.lua",
+                r#"
+---@type XX
+XX = require("file_a")
+"#,
+            ),
+        ]);
+
+        let a_ty = ws.expr_ty("XX.A");
+        assert_ne!(
+            a_ty,
+            LuaType::Unknown,
+            "XX.A should be inferred when plain table is in file_a and @type XX is in file_c (order 1), got: {:?}",
+            a_ty
+        );
+        assert_ne!(a_ty, LuaType::Nil, "XX.A should not be nil (order 1), got: {:?}", a_ty);
+
+        let c_ty = ws.expr_ty("XX.C");
+        assert_ne!(
+            c_ty,
+            LuaType::Unknown,
+            "XX.C should be inferred (order 1), got: {:?}",
+            c_ty
+        );
+    }
+
+    #[test]
+    fn test_at_type_annotated_global_require_cross_file_reversed() {
+        // Order 2: @type file analyzed before the plain table file.
+        let mut ws = VirtualWorkspace::new();
+        ws.def_files(vec![
+            (
+                "file_b.lua",
+                r#"
+---@class XX
+"#,
+            ),
+            (
+                "file_c.lua",
+                r#"
+---@type XX
+XX = require("file_a")
+"#,
+            ),
+            (
+                "file_a.lua",
+                r#"
+XX = {}
+XX.A = 1
+XX.B = 2
+XX.C = 3
+"#,
+            ),
+        ]);
+
+        let a_ty = ws.expr_ty("XX.A");
+        assert_ne!(
+            a_ty,
+            LuaType::Unknown,
+            "XX.A should be inferred when plain table file_a is analyzed after @type file_c, got: {:?}",
+            a_ty
+        );
+        assert_ne!(
+            a_ty,
+            LuaType::Nil,
+            "XX.A should not be nil (order 2), got: {:?}",
+            a_ty
+        );
     }
 }
